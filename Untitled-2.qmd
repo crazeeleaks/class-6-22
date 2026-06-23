@@ -1,0 +1,157 @@
+---
+title: "Daily Maximum Temperatures in Portland, 1979–2021"
+subtitle: "Recreating the NYT Upshot heat-wave chart with real NOAA station data"
+format: html
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+In late June 2021, Portland, Seattle, and Vancouver experienced one of the
+most extreme heat waves on record for the Pacific Northwest. The chart
+below reproduces that moment using 42+ years of real daily maximum
+temperature data for Portland International Airport (station
+`USW00024229`), pulled live from NOAA's NCEI Access Data Service.
+
+```{r}
+#| label: setup
+#| include: false
+
+packages <- c("httr", "readr", "dplyr", "ggplot2", "lubridate")
+installed <- packages %in% rownames(installed.packages())
+if (any(!installed)) install.packages(packages[!installed])
+
+library(httr)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+```
+
+```{r}
+#| label: fetch-data
+
+# Station USW00024229 = Portland International Airport, OR
+station_id <- "USW00024229"
+start_date <- "1979-01-01"
+end_date   <- "2021-06-29"
+
+url <- paste0(
+  "https://www.ncei.noaa.gov/access/services/data/v1",
+  "?dataset=daily-summaries",
+  "&dataTypes=TMAX",
+  "&stations=", station_id,
+  "&startDate=", start_date,
+  "&endDate=", end_date,
+  "&units=standard",
+  "&format=csv"
+)
+
+resp <- GET(url)
+stop_for_status(resp)
+raw_csv <- content(resp, as = "text", encoding = "UTF-8")
+weather <- read_csv(raw_csv, show_col_types = FALSE)
+```
+
+```{r}
+#| label: clean-data
+
+weather <- weather %>%
+  mutate(
+    DATE = as_date(DATE),
+    fake_date = as_date(paste0("2000-", sprintf("%02d", month(DATE)), "-",
+                                sprintf("%02d", day(DATE))))
+  ) %>%
+  filter(!is.na(TMAX))
+
+last_days <- weather %>%
+  filter(DATE >= as_date(end_date) - 2) %>%
+  arrange(DATE)
+
+history <- weather %>%
+  filter(DATE < as_date(end_date) - 2)
+```
+
+```{r}
+#| label: fig-portland-temps
+#| fig-cap: "Daily maximum temperatures in Portland, 1979-2021, with the late-June 2021 heat wave highlighted in red."
+#| fig-width: 10
+#| fig-height: 7.5
+
+p <- ggplot() +
+  geom_jitter(
+    data = history,
+    aes(x = fake_date, y = TMAX),
+    width = 1.2, height = 0,
+    color = "#7a8b99", alpha = 0.10, size = 0.9, shape = 16, stroke = 0
+  ) +
+  geom_point(
+    data = last_days,
+    aes(x = fake_date, y = TMAX),
+    color = "#b7312c", size = 3.4, shape = 16
+  ) +
+  annotate(
+    "text",
+    x = last_days$fake_date[1] - 18,
+    y = max(last_days$TMAX) + 5,
+    label = "Last 3 days",
+    color = "#b7312c", fontface = "bold", hjust = 0, size = 4.6,
+    family = "sans"
+  ) +
+  scale_x_date(
+    date_labels = "%b",
+    date_breaks = "1 month",
+    expand = expansion(mult = c(0.02, 0.04))
+  ) +
+  scale_y_continuous(
+    limits = c(0, 122),
+    breaks = seq(20, 120, 20),
+    expand = c(0, 0)
+  ) +
+  coord_cartesian(clip = "off") +
+  labs(
+    title = paste0("Daily maximum temperatures in Portland, ",
+                    year(as_date(start_date)), "-", year(as_date(end_date))),
+    subtitle = "120 deg. Fahrenheit",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal(base_size = 14, base_family = "sans") +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(color = "grey88", linewidth = 0.4),
+    axis.text.y = element_text(color = "#6b6f8c", size = 11),
+    axis.text.x = element_text(color = "#444444", size = 11, margin = margin(t = 6)),
+    axis.ticks = element_blank(),
+    axis.line.x = element_line(color = "black", linewidth = 0.6),
+    plot.title = element_text(face = "bold", size = 17, color = "#1a1a1a",
+                               margin = margin(b = 2)),
+    plot.subtitle = element_text(color = "#6b6f8c", size = 11.5,
+                                  margin = margin(b = 14)),
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.margin = margin(25, 45, 15, 15)
+  )
+
+p
+```
+
+```{r}
+#| label: save-png
+#| include: false
+
+ggsave(
+  filename = "portland_max_temps_1979_2021.png",
+  plot = p,
+  width = 10, height = 7.5, dpi = 320,
+  bg = "white"
+)
+```
+
+### About the data
+
+Source: NOAA NCEI GHCN-Daily dataset, station `USW00024229` (Portland
+International Airport, OR). Portland's all-time record high — 116°F on
+June 28, 2021 — falls within the highlighted three-day window above.
+
